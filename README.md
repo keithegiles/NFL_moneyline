@@ -1,7 +1,7 @@
 # NFL_moneyline
-currently only successful betting strategy, as of Jan2020\n
+currently only successful betting strategy, as of Jan2020
 
-Overall strategy
+Overall strategy\n
 I) Pull  game data
   a) use scrapR to pull all individual stats for each game 
   b) compute the stats delta between the two teams for each game (all stats deltas are relative to home team)
