@@ -1,5 +1,5 @@
 # NFL_moneyline
-currently only successful betting strategy, as of Jan2020
+currently only successful betting strategy, as of Jan2020\n
 
 Overall strategy
 I) Pull  game data
