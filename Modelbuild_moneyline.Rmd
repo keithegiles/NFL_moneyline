@@ -1,0 +1,267 @@
+---
+title: "ATSmerge"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(plyr)
+library(dplyr)
+library(randomForest)
+library(zoo)
+library(ranger)
+library(readxl)
+```
+import AllGamesMA5 and ATS  data
+
+
+```{r}
+AllGamesMA5 <- read.csv("HomeGamesMA5adj.csv", row.names = 1)
+AllGamesMA5$Date <- as.Date(AllGamesMA5$Date, "%Y-%m-%d")
+AllGamesMA5$HomeTeam <- as.character(AllGamesMA5$HomeTeam)
+AllGamesMA5$HomeDate <- paste0(AllGamesMA5$HomeTeam,AllGamesMA5$Date)
+AllGamesMA5$HomeDate <- as.character(AllGamesMA5$HomeDate)
+AllGamesTrainingTest <- subset(AllGamesMA5, week >= 5)
+AllGamesTrainingTest$week <- as.factor(AllGamesTrainingTest$week)
+table(AllGamesTrainingTest$season)
+table(AllGamesTrainingTest$week)
+```
+
+
+#Import Spread
+```{r}
+Spread10_18 <- readRDS("/home/rstudio/nfl_predictions/NFL_spread_ML_OverUnder.RDS")
+SpreadGrouped <- group_by(Spread10_18, HomeDate) %>% summarise_all(first) 
+names(SpreadGrouped) <- gsub(pattern = "HomeOpeningSpread","OpeningSpread",names(SpreadGrouped))
+names(SpreadGrouped) <- gsub(pattern = "HomeClosingSpread","ClosingSpread",names(SpreadGrouped))
+table(SpreadGrouped$Season)
+head(SpreadGrouped$HomeDate)
+names(SpreadGrouped)
+```
+
+
+
+```{r}
+Joined1 <- merge(x = AllGamesTrainingTest, y = SpreadGrouped[c(1,7:9,12,13)], by ="HomeDate")
+Joined1$Movement <- Joined1$OpeningSpread - Joined1$ClosingSpread
+table(Joined1$season)
+table(Joined1$week)
+Joined1$NetScore <- as.numeric(Joined1$NetScore)
+Joined1 <- subset(Joined1, Location == "H")
+TrainingSet <- subset(Joined1, season != "2015")
+TrainingSet <- na.omit(TrainingSet)
+names(TrainingSet)
+table(TrainingSet$season)
+table(TrainingSet$week)
+```
+
+
+
+```{r}
+set.seed(1)
+FullModel  <- randomForest(NetScore ~., data = subset(TrainingSet[c(2:52,60,64:67,69:72)], mtry= 54/3, nodesize = 100, ntree = 500))
+AllFeaturesImportance <- data.frame(FullModel$importance)
+AllFeaturesImportance$Features <- row.names(AllFeaturesImportance)
+AllFeaturesImportance <- AllFeaturesImportance[order(-AllFeaturesImportance$IncNodePurity),]
+FeatureList <- AllFeaturesImportance$Features
+head(AllFeaturesImportance,20)
+```
+
+```{r}
+TestSet <- subset(Joined1, season == "2015")
+TestSet <- na.omit(TestSet)
+table(TestSet$season)
+table(TestSet$week)
+```
+
+```{r}
+tmp1 <- predict(object = FullModel,  newdata = subset(TestSet, select = names(TestSet) %in% FeatureList), predict.all =T)
+tmp2 <- tmp1$individual
+tmp2 <- data.frame(tmp2)
+names(tmp2) <- paste0("model",seq(1:500))
+TestSetPredictions <- cbind(TestSet,tmp2)
+win <- matrix(data = 0,nrow = nrow(TestSetPredictions),ncol = 1)
+tie <- matrix(data = 0,nrow = nrow(TestSetPredictions),ncol = 1)
+lose <- matrix(data = 0,nrow = nrow(TestSetPredictions),ncol = 1)
+for (j in seq(1:nrow(TestSetPredictions))){
+  for (i in seq(from = 73, to= 572, by = 1)){
+    tmp_cover <- as.numeric(TestSetPredictions[j,i] >  0)
+    win[j,1] <- win[j,1]  + tmp_cover
+    tmp_push <- as.numeric(TestSetPredictions[j,i] == 0)
+    tie[j,1] <- tie[j,1] + tmp_push
+    tmp_NotCover <- as.numeric(TestSetPredictions[j,i]  < 0)
+    lose[j,1] <- lose[j,1] + tmp_NotCover
+    }
+}
+head(win+tie+lose)
+```
+Score model straight up
+```{r}
+TestSetPredictions$TotalWin <- win[,1]
+TestSetPredictions$TotalTie <-  tie[,1]
+TestSetPredictions$TotalLose <- lose[,1]
+TestSetPredictions$pWin <- TestSetPredictions$TotalWin/500
+TestSetPredictions$pTie <- TestSetPredictions$TotalTie/500
+TestSetPredictions$pLose <- TestSetPredictions$TotalLose/500
+TestSetPredictions$Prediction <- ifelse(TestSetPredictions$pWin > .5, 1,'na')
+TestSetPredictions$Prediction <- ifelse(TestSetPredictions$pWin < .5, -1, TestSetPredictions$Prediction)
+TestSetPredictions$Prediction <- ifelse(TestSetPredictions$pWin < .5 & TestSetPredictions$pLose < .5, 0, TestSetPredictions$Prediction)
+TestSetPredictions$Prediction <- ifelse(TestSetPredictions$pWin == .5, 0, TestSetPredictions$Prediction)
+TestSetPredictions$ActualOutcome <- ifelse(TestSetPredictions$NetScore > 0, 1, 'na')
+TestSetPredictions$ActualOutcome <- ifelse(TestSetPredictions$NetScore < 0, -1, TestSetPredictions$ActualOutcome)
+TestSetPredictions$ActualOutcome <- ifelse(TestSetPredictions$NetScore == 0, 0, TestSetPredictions$ActualOutcome)
+TestSetPredictions$PredictionOutcome <- ifelse(TestSetPredictions$Prediction == TestSetPredictions$ActualOutcome,1,0)
+TestSetNoPush <- subset(TestSetPredictions,Prediction != 0)
+TestSetNoPush <- subset(TestSetPredictions,ActualOutcome != 0)
+sum(TestSetPredictions$PredictionOutcome)/nrow(TestSetPredictions)
+names(TestSetPredictions)[570:580]
+```
+
+
+
+
+```{r}
+WeeklySummary <- group_by(TestSetNoPush, as.numeric(as.character(week))) %>% summarise(TotalGames = n(), TotalWins = sum(PredictionOutcome)) %>% as.data.frame()
+WeeklySummary$Percent <- WeeklySummary$TotalWins/WeeklySummary$TotalGames
+Mean <- mean(WeeklySummary$Percent[1:8])
+SD <- sd(WeeklySummary$Percent[1:8])
+WeeklySummary
+paste0("ModelResults: ",Mean,"+/-",SD)
+#3
+```
+
+
+```{r}
+Sixty <- subset(TestSetNoPush, pWin >= .6 | pWin <= .4)
+Seventy <- subset(TestSetNoPush, pWin >= .7 | pWin <= .3)
+Eighty <- subset(TestSetNoPush,pWin >= .8 | pWin <= .2)
+sum(Sixty$PredictionOutcome)/nrow(Sixty)
+sum(Seventy$PredictionOutcome)/nrow(Seventy)
+sum(Eighty$PredictionOutcome)/nrow(Eighty)
+```
+
+
+
+
+Bet each game
+```{r}
+TestSetSummary <- TestSetPredictions[c(1:71,573:580)]
+TestSetSummary$Home_ml_percentage <- ifelse(TestSetSummary$HomeOpeningML > 0, 100/(TestSetSummary$HomeOpeningML + 100), TestSetSummary$HomeOpeningML/(TestSetSummary$HomeOpeningML - 100))
+TestSetSummary$Away_ml_precentage <- ifelse(TestSetSummary$AwayOpeningML > 0, 100/(TestSetSummary$AwayOpeningML + 100), TestSetSummary$AwayOpeningML/(TestSetSummary$AwayOpeningML - 100))
+TestSetSummary$HomeValue <- TestSetSummary$pWin/TestSetSummary$Home_ml_percentage
+TestSetSummary$AwayValue <- TestSetSummary$pLose/TestSetSummary$Away_ml_precentage
+TestSetSummary$MaxValue <- ifelse(TestSetSummary$HomeValue > TestSetSummary$AwayValue,TestSetSummary$HomeValue,TestSetSummary$AwayValue)
+TestSetSummary$WhoToBet <- ifelse(TestSetSummary$HomeValue > TestSetSummary$AwayValue,1,-1)
+TestSetSummary$WhoToBet <- as.character(TestSetSummary$WhoToBet)
+TestSetSummary$ML_toUse <- ifelse(TestSetSummary$HomeValue > TestSetSummary$AwayValue,TestSetSummary$HomeOpeningML,TestSetSummary$AwayOpeningML)
+TotalWagered <- nrow(TestSetSummary)*100
+CorrectBets <- subset(TestSetSummary, WhoToBet == ActualOutcome)
+nrow(CorrectBets)/nrow(TestSetSummary)
+CorrectBets$GrossReturn <- ifelse(CorrectBets$ML_toUse < 0, ((100/-CorrectBets$ML_toUse)*100)+100,CorrectBets$ML_toUse+100)
+TotalWinnings <- sum(CorrectBets$GrossReturn)
+TotalWinnings/TotalWagered
+```
+#isolate high value bets
+```{r}
+Value10 <- subset(TestSetSummary, MaxValue > 1.1)
+CorrectBets <- subset(Value10, WhoToBet == ActualOutcome)
+CorrectBets$GrossReturn <- ifelse(CorrectBets$ML_toUse < 0, ((100/-CorrectBets$ML_toUse)*100)+100,CorrectBets$ML_toUse+100)
+TotalWinnings <- sum(CorrectBets$GrossReturn)
+LayOut <- group_by(Value10, week) %>% summarise(TotalBets = n()) %>% as.data.frame()
+LayOut$WeeklyOutgoing <- LayOut$TotalBets * 100
+
+Value10Summary <- group_by(CorrectBets, week) %>% summarise(WinningBets = n(), GrossReturn = sum(GrossReturn)) %>% as.data.frame()
+
+Value10Summary <- merge(x = Value10Summary,y = LayOut,by = "week")
+Value10Summary$week <- as.numeric(as.character(Value10Summary$week))
+Value10Summary <- Value10Summary[order(Value10Summary$week),]
+Value10Summary <- Value10Summary[c(1,4,5,2,3)]
+Value10Summary$NetProfit <- Value10Summary$GrossReturn - Value10Summary$WeeklyOutgoing
+Value10Summary$NetReturn <- (Value10Summary$NetProfit/Value10Summary$WeeklyOutgoing) +1
+Value10Summary$cumProfit <- cumsum(Value10Summary$NetProfit)
+Value10Summary$cumReturn <- cumprod(Value10Summary$NetReturn)
+Value10Summary$LetItRide <- Value10Summary$GrossReturn
+for (i in seq(from=2, to= nrow(Value10Summary), by = 1)){
+  Value10Summary$LetItRide[1] <- Value10Summary$GrossReturn[1]
+  Value10Summary$LetItRide[i] <- Value10Summary$LetItRide[i-1]*Value10Summary$NetReturn[i]
+}
+Value10Summary
+```
+
+```{r}
+Value20 <- subset(TestSetSummary, MaxValue > 1.2)
+CorrectBets <- subset(Value20, WhoToBet == ActualOutcome)
+CorrectBets$GrossReturn <- ifelse(CorrectBets$ML_toUse < 0, ((100/-CorrectBets$ML_toUse)*100)+100,CorrectBets$ML_toUse+100)
+TotalWinnings <- sum(CorrectBets$GrossReturn)
+LayOut <- group_by(Value20, week) %>% summarise(TotalBets = n()) %>% as.data.frame()
+LayOut$WeeklyOutgoing <- LayOut$TotalBets * 100
+
+Value20Summary <- group_by(CorrectBets, week) %>% summarise(WinningBets = n(), GrossReturn = sum(GrossReturn)) %>% as.data.frame()
+
+Value20Summary <- merge(x = Value20Summary,y = LayOut,by = "week")
+Value20Summary$week <- as.numeric(as.character(Value20Summary$week))
+Value20Summary <- Value20Summary[order(Value20Summary$week),]
+Value20Summary <- Value20Summary[c(1,4,5,2,3)]
+Value20Summary$NetProfit <- Value20Summary$GrossReturn - Value20Summary$WeeklyOutgoing
+Value20Summary$NetReturn <- (Value20Summary$NetProfit/Value20Summary$WeeklyOutgoing) +1
+Value20Summary$cumProfit <- cumsum(Value20Summary$NetProfit)
+Value20Summary$cumReturn <- cumprod(Value20Summary$NetReturn)
+Value20Summary$LetItRide <- Value20Summary$GrossReturn
+for (i in seq(from=2, to= nrow(Value20Summary), by = 1)){
+  Value20Summary$LetItRide[1] <- Value20Summary$GrossReturn[1]
+  Value20Summary$LetItRide[i] <- Value20Summary$LetItRide[i-1]*Value20Summary$NetReturn[i]
+}
+Value20Summary
+```
+
+
+```{r}
+Value30 <- subset(TestSetSummary, MaxValue > 1.3)
+CorrectBets <- subset(Value30, WhoToBet == ActualOutcome)
+CorrectBets$GrossReturn <- ifelse(CorrectBets$ML_toUse < 0, ((100/-CorrectBets$ML_toUse)*100)+100,CorrectBets$ML_toUse+100)
+TotalWinnings <- sum(CorrectBets$GrossReturn)
+LayOut <- group_by(Value30, week) %>% summarise(TotalBets = n()) %>% as.data.frame()
+LayOut$WeeklyOutgoing <- LayOut$TotalBets * 100
+
+Value30Summary <- group_by(CorrectBets, week) %>% summarise(WinningBets = n(), GrossReturn = sum(GrossReturn)) %>% as.data.frame()
+
+Value30Summary <- merge(x = Value30Summary,y = LayOut,by = "week")
+Value30Summary$week <- as.numeric(as.character(Value30Summary$week))
+Value30Summary <- Value30Summary[order(Value30Summary$week),]
+Value30Summary <- Value30Summary[c(1,4,5,2,3)]
+Value30Summary$NetProfit <- Value30Summary$GrossReturn - Value30Summary$WeeklyOutgoing
+Value30Summary$NetReturn <- (Value30Summary$NetProfit/Value30Summary$WeeklyOutgoing) +1
+Value30Summary$cumProfit <- cumsum(Value30Summary$NetProfit)
+Value30Summary$cumReturn <- cumprod(Value30Summary$NetReturn)
+Value30Summary$LetItRide <- Value30Summary$GrossReturn
+for (i in seq(from=2, to= nrow(Value30Summary), by = 1)){
+  Value30Summary$LetItRide[1] <- Value30Summary$GrossReturn[1]
+  Value30Summary$LetItRide[i] <- Value30Summary$LetItRide[i-1]*Value30Summary$NetReturn[i]
+}
+Value30Summary
+```
+
+Betting only dogs
+```{r}
+DogsOnly <- subset(TestSetSummary, ML_toUse > 0)
+CorrectBets <- subset(DogsOnly, WhoToBet == ActualOutcome)
+CorrectBets$GrossReturn <- ifelse(CorrectBets$ML_toUse < 0, ((100/-CorrectBets$ML_toUse)*100)+100,CorrectBets$ML_toUse+100)
+TotalWinnings <- sum(CorrectBets$GrossReturn)
+LayOut <- group_by(DogsOnly, week) %>% summarise(TotalBets = n()) %>% as.data.frame()
+LayOut$WeeklyOutgoing <- LayOut$TotalBets * 100
+
+DogsOnlySummary <- group_by(CorrectBets, week) %>% summarise(WinningBets = n(), GrossReturn = sum(GrossReturn)) %>% as.data.frame()
+
+DogsOnlySummary <- merge(x = DogsOnlySummary,y = LayOut,by = "week")
+DogsOnlySummary$week <- as.numeric(as.character(DogsOnlySummary$week))
+DogsOnlySummary <- DogsOnlySummary[order(DogsOnlySummary$week),]
+DogsOnlySummary <- DogsOnlySummary[c(1,4,5,2,3)]
+DogsOnlySummary$NetProfit <- DogsOnlySummary$GrossReturn - DogsOnlySummary$WeeklyOutgoing
+DogsOnlySummary$NetReturn <- (DogsOnlySummary$NetProfit/DogsOnlySummary$WeeklyOutgoing) +1
+DogsOnlySummary$cumProfit <- cumsum(DogsOnlySummary$NetProfit)
+DogsOnlySummary$cumReturn <- cumprod(DogsOnlySummary$NetReturn)
+glimpse(DogsOnlySummary)
+DogsOnlySummary
+```
+
+

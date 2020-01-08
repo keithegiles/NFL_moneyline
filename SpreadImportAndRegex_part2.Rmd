@@ -1,0 +1,222 @@
+---
+title: "Import_Spread_Data"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+getwd()
+```
+
+
+```{r}
+Spread08 <- read_excel("./SpreadData.xlsx")
+Spread09 <- read_excel("./SpreadData.xlsx", sheet = "2008-2009")
+Spread10 <- read_excel("./SpreadData.xlsx", sheet = "2009-2010")
+Spread11 <- read_excel("./SpreadData.xlsx", sheet = "2010-2011")
+Spread12 <- read_excel("./SpreadData.xlsx", sheet = "2011-2012")
+Spread13 <- read_excel("./SpreadData.xlsx", sheet = "2012-2013")
+Spread14 <- read_excel("./SpreadData.xlsx", sheet = "2013-2014")
+Spread15 <- read_excel("./SpreadData.xlsx", sheet = "2014-2015")
+Spread16 <- read_excel("./SpreadData.xlsx", sheet = "2015-2016")
+Spread17 <- read_excel("./SpreadData.xlsx",sheet = "2016-2017", col_types = c("text","text", "date", "text","numeric",
+"numeric", "numeric", "numeric","numeric", "numeric", "numeric","text", "numeric", "numeric", "numeric","numeric", "numeric", "numeric","numeric", "numeric", "numeric","text", "text", "text", "numeric","numeric", "text", "text", "numeric","numeric", "text", "text", "numeric","numeric", "numeric", "numeric","numeric", "numeric", "numeric","numeric", "numeric", "numeric","numeric", "numeric", "numeric","numeric", "numeric", "numeric"))
+Spread17 <- subset(Spread17, !is.na(Date))
+Spread17$Date <- as.character(Spread17$Date)
+head(Spread17)
+tail(Spread17)
+Spread18<- read_excel("./SpreadData.xlsx", sheet = "2017-2018", col_types = c("text", "text", "date", "text", "numeric", "numeric", "numeric", "numeric","numeric", "numeric", "numeric","text", "numeric", "numeric", "numeric",
+"numeric", "numeric", "numeric","numeric", "numeric", "numeric","text", "text", "text", "numeric",
+"numeric", "text", "text", "numeric","numeric", "text", "text", "numeric","numeric", "numeric", "numeric",
+"numeric", "numeric", "numeric","numeric", "numeric", "numeric","numeric", "numeric", "numeric","numeric", "numeric"))
+Spread18 <- subset(Spread18, !is.na(Date))
+Spread18$Date <- as.character(Spread18$Date)
+head(Spread18)
+tail(Spread18)
+Spread19 <- read_excel("./SpreadData.xlsx",sheet = "2018-2019", col_types = c("text","text", "date", "text","numeric",
+"numeric", "numeric", "numeric","numeric", "numeric", "numeric","text", "numeric", "numeric", "numeric","numeric", "numeric", "numeric","numeric", "numeric", "numeric","text", "text", "text", "numeric","numeric", "text", "text", "numeric","numeric", "text", "text", "numeric","numeric", "numeric", "numeric","text", "numeric", "numeric", "numeric","numeric", "numeric", "numeric","numeric", "numeric", "text", "text"))
+Spread19$Date <- as.character(Spread19$Date)
+Spread19 <- subset(Spread19, !is.na(Date))
+head(Spread19)
+tail(Spread19)
+```
+
+```{r}
+NFLspread1 <- rbind(Spread08,Spread09,Spread10,Spread11,Spread12,Spread13,Spread14,Spread15,Spread15,Spread16)
+```
+
+
+```{r}
+Spread17 <- Spread17[1:21]
+Spread18 <- Spread18[1:21]
+Spread19 <- Spread19[1:21]
+names(Spread17) <- names(NFLspread1)
+names(Spread18) <- names(NFLspread1)
+names(Spread19) <- names(NFLspread1)
+NFLspread2 <- rbind(Spread17,Spread18,Spread19)
+NFLspread2$Date <- as.Date(NFLspread2$Date, "%Y-%m-%d")
+head(NFLspread2)
+tail(NFLspread2)
+```
+
+Capture the spread only
+```{r}
+placeHolder <- as.data.frame(strsplit(x = NFLspread1$Date, split = "/"))
+placeHolder <- t(placeHolder)
+placeHolder <- data.frame(placeHolder)
+names(placeHolder) <- c("month","day","year")
+placeHolder$month <- as.numeric(as.character(placeHolder$month))
+placeHolder$RowNumber <- row.names(NFLspread1)
+NFLspread1 <- cbind(NFLspread1,placeHolder)
+singleDigits <- subset(NFLspread1, month < 10)
+singleDigits$month <- as.character(singleDigits$month)
+singleDigits$month <- paste0('0',singleDigits$month)
+doubleDigits <- subset(NFLspread1, month >= 10)
+NFLspread1 <- rbind(singleDigits,doubleDigits)
+NFLspread1$day <- as.numeric(as.character(NFLspread1$day))
+singleDigits <- subset(NFLspread1, day <= 9)
+doubleDigits <- subset(NFLspread1, day > 9)
+singleDigits$day <- as.character(singleDigits$day)
+singleDigits$day <- paste0("0",singleDigits$day)
+NFLspread1 <- rbind(singleDigits,doubleDigits)
+NFLspread1$year <- paste0("20",NFLspread1$year)
+NFLspread1$FullDate <- paste0(NFLspread1$year,"-",NFLspread1$month, "-",NFLspread1$day)
+NFLspread1$Date <- NFLspread1$FullDate
+NFLspread1 <- NFLspread1[-c(22:26)]
+class(NFLspread1$Date)
+names(NFLspread1) == names(NFLspread2)
+head(NFLspread2)
+tail(NFLspread2)
+NFLspread2$Date <- as.character(NFLspread2$Date)
+```
+
+Combine 
+```{r}
+NFLspread <- rbind(NFLspread1,NFLspread2)
+row.names(NFLspread) <- seq(1:nrow(NFLspread))
+head(NFLspread)
+tail(NFLspread)
+```
+
+
+
+regex team names
+```{r}
+tmp <- NFLspread 
+tmp[2] <- lapply(tmp[2], function(x) gsub("Washington","WAS",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Green Bay","GNB",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Houston","HOU",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Atlanta","ATL",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Baltimore","BAL",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Buffalo","BUF",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Detroit","DET",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Indianapolis","IND",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Miami","MIA",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("NY Giants","NYG",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Arizona","ARI",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("LA Rams","LAR",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Denver","DEN",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Chicago","CHI",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("New Orleans","NOR",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Pittsburgh","PIT",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Philadelphia","PHI",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Carolina","CAR",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Tennessee","TEN",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Cleveland","CLE",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("New England","NWE",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Buffalo","BUF",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Kansas City","KAN",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Oakland","OAK",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("LA Chargers","LAC",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Seattle","SEA",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Tampa Bay","TAM",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Jacksonville","JAX",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Minnesota","MIN",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Dallas","DAL",x))
+tmp[2] <- lapply(tmp[2], function(x) gsub("Cincinnati","CIN",x))
+names(tmp) <- gsub("Home Team","Home", names(tmp))
+tmp$Home <- gsub(pattern = "L.A. Chargers", "LAC", tmp$Home)
+tmp$Home <- gsub(pattern = "Los Angeles Chargers","LAC",tmp$Home)
+tmp$Home <- gsub(pattern = "N.Y. Giants","NYG",tmp$Home)
+tmp$Home <- gsub(pattern = "Los Angeles Rams", "LAR", tmp$Home)
+tmp$Home <- gsub(pattern = "L.A. Rams Rams", "LAR",tmp$Home)
+tmp$Home <- gsub(pattern = "New York Giants", "NYG", tmp$Home)
+tmp$Home <- gsub(pattern = "N.Y. Jets", "NYJ", tmp$Home)
+tmp$Home <- gsub(pattern = "New York Jets", "NYJ", tmp$Home)
+tmp$Home <- gsub(pattern = "San Diego Chargers", "SDG", tmp$Home)
+tmp$Home <- gsub(pattern = "L.A. Rams", "LAR", tmp$Home)
+tmp$Home <- gsub(pattern = "San Francisco 49ers", "SFO", tmp$Home)
+tmp$Home <- gsub(pattern = "St. Louis Rams", "STL", tmp$Home)
+tmp$Home <- gsub(pattern = "New", "NWE", tmp$Home, ignore.case = T)
+tmp$Home <- substr(x = tmp$Home, start = 0, stop = 3)
+#away team
+tmp[12] <- lapply(tmp[12], function(x) gsub("Washington","WAS",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Green Bay","GNB",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Houston","HOU",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Atlanta","ATL",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Baltimore","BAL",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Buffalo","BUF",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Detroit","DET",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Indianapolis","IND",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Miami","MIA",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("NY Giants","NYG",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Arizona","ARI",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("LA Rams","LAR",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Denver","DEN",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Chicago","CHI",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("New Orleans","NOR",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Pittsburgh","PIT",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Philadelphia","PHI",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Carolina","CAR",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Tennessee","TEN",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Cleveland","CLE",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("New England","NWE",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Buffalo","BUF",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Kansas City","KAN",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Oakland","OAK",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("LA Chargers","LAC",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Seattle","SEA",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Tampa Bay","TAM",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Jacksonville","JAX",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Minnesota","MIN",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Dallas","DAL",x))
+tmp[12] <- lapply(tmp[12], function(x) gsub("Cincinnati","CIN",x))
+names(tmp) <- gsub("Away Team","Away", names(tmp))
+tmp$Away <- gsub(pattern = "L.A. Chargers", "LAC", tmp$Away)
+tmp$Away <- gsub(pattern = "Los Angeles Chargers","LAC",tmp$Away)
+tmp$Away <- gsub(pattern = "N.Y. Giants","NYG",tmp$Away)
+tmp$Away <- gsub(pattern = "Los Angeles Rams", "LAR", tmp$Away)
+tmp$Away <- gsub(pattern = "L.A. Rams Rams", "LAR",tmp$Away)
+tmp$Away <- gsub(pattern = "New York Giants", "NYG", tmp$Away)
+tmp$Away <- gsub(pattern = "N.Y. Jets", "NYJ", tmp$Away)
+tmp$Away <- gsub(pattern = "New York Jets", "NYJ", tmp$Away)
+tmp$Away <- gsub(pattern = "San Diego Chargers", "SDG", tmp$Away)
+tmp$Away <- gsub(pattern = "L.A. Rams", "LAR", tmp$Away)
+tmp$Away <- gsub(pattern = "San Francisco 49ers", "SFO", tmp$Away)
+tmp$Away <- gsub(pattern = "St. Louis Rams", "STL", tmp$Away)
+tmp$Away <- gsub(pattern = "New", "NWE", tmp$Away, ignore.case = T)
+tmp$Away <- substr(x = tmp$Away, start = 0, stop = 3)
+NFLspreadRegex <- tmp
+NFLspreadRegex$Home <- toupper(NFLspreadRegex$Home)
+NFLspreadRegex$Home <- gsub(pattern = "GRE",replacement = "GNB", x = NFLspreadRegex$Home)
+NFLspreadRegex$Home <- gsub(pattern = "JAC","JAX",NFLspreadRegex$Home)
+NFLspreadRegex$Home <- gsub(pattern = "SDG","SDC",NFLspreadRegex$Home)
+names(NFLspreadRegex) <- gsub(" ","",names(NFLspreadRegex))
+NFLspreadRegex$HomeDate <- paste0(NFLspreadRegex$Home, NFLspreadRegex$Date)
+NFLspreadRegex$HomeAndAway <- paste0(NFLspreadRegex$Home,"at",NFLspreadRegex$Away)
+NFLspreadRegex$Season <- substr(x = NFLspreadRegex$Season, start = 0, stop = 4)
+NFLspreadRegex$Week <- gsub("Week ","", NFLspreadRegex$Week)
+NFLspreadRegex <- NFLspreadRegex[c(1:8,12,13,16,20,22)]
+names(NFLspreadRegex) <- gsub("OpeningO/UTotal","OverUnder",names(NFLspreadRegex))
+NFLspreadRegex$HomeDate <- paste0(NFLspreadRegex$Home, NFLspreadRegex$Date)
+saveRDS(NFLspreadRegex, "./NFL_spread_ML_OverUnder.RDS")
+write.csv(NFLspreadRegex, "./NFL_Spread_ML_OverUnder.csv")
+table(NFLspreadRegex$Season)
+table(NFLspreadRegex$Week)
+names(NFLspreadRegex)
+```
+
+
+
+
+

@@ -1,0 +1,328 @@
+---
+title: "NFLscrapR"
+author: "Keith E Giles"
+date: "3/5/2019"
+output: html_document
+---
+```{r setup, include=T, eval = T}
+knitr::opts_chunk$set(echo = TRUE)
+# Must install the devtools package using the below commented out code
+#install.packages('devtools')
+#library(devtools)
+
+#devtools::install_github(repo = "maksimhorowitz/nflscrapR")
+#> Skipping install for github remote, the SHA1 (05815ef8) has not changed since last install.
+#>   Use `force = TRUE` to force installation
+
+# Load the package
+#install.packages("RCurl")
+library(RCurl)
+library(nflscrapR)
+library(plyr)
+library(dplyr)
+library(randomForest)
+library(rvest)
+getwd()
+```
+
+Skip the first 3 trunks and import directly from prevoiusly saved file
+```{r import single season and format into training set, eval = F}
+Seasons <- c(seq(2010,2013,1))
+Weeks <- seq(1,17,1)
+DeltaStats <- as.data.frame(NULL)
+for (i in seq(1:length(Seasons))){
+  for (j in 1:length(Weeks)){
+    GameID_DFs <- scrape_game_ids(season = Seasons[i], type = "reg", weeks = Weeks[j])
+    GameIDs <- as.character(GameID_DFs$game_id)
+    for (k in 1:length(GameIDs)){
+        HomeTeam <- as.character(GameID_DFs$home_team[k])
+        AwayTeam <- as.character(GameID_DFs$away_team[k])
+        HomeTeam <- gsub("JAX","JAC",HomeTeam)
+        AwayTeam <- gsub("JAX","JAC",AwayTeam)
+        HomeScore <- as.numeric(as.character(GameID_DFs$home_score[k]))
+        AwayScore <- as.numeric(as.character(GameID_DFs$away_score[k]))
+        PlayerStats <- player_game(GameID = GameIDs[k])
+        PlayerStats$Team <- as.character(PlayerStats$Team)
+        TeamStats <- group_by(PlayerStats[c(3,6:55)],Team) %>% summarise_all(sum)
+        TeamStats <- na.omit(TeamStats)
+        TeamStats$Team <- as.character(TeamStats$Team)
+        TeamStats$Team <- gsub("JAX","JAC",TeamStats$Team)
+        Date <- as.character(PlayerStats$date[1])
+        HomeStats <- subset(TeamStats,Team == HomeTeam)
+        AwayStats <- subset(TeamStats,Team == AwayTeam)
+        tmp <- HomeStats 
+        tmp       <- HomeStats[2:51] - AwayStats[2:51]
+        tmp$week <- Weeks[j]
+        tmp$season <- i
+        tmp$GameID <- GameIDs[k]
+        tmp$HomeTeam <- HomeTeam
+        tmp$HomeScore <- HomeScore
+        tmp$AwayTeam <- AwayTeam 
+        tmp$AwayScore <- AwayScore
+        tmp$HomeTeam <- as.character(tmp$HomeTeam)
+        tmp$AwayTeam <- as.character(tmp$AwayTeam)
+        tmp$Date <- Date
+        tmp$NetScore <- tmp$HomeScore - tmp$AwayScore
+        DeltaStats  <- rbind(DeltaStats,tmp)
+        DeltaStats[1:10,50:56]
+       }
+  }
+}
+DeltaStats_2010_2013 <- DeltaStats[order(DeltaStats$GameID),]
+DeltaStats_2010_2013[1:10,50:59]
+DeltaStats_2010_2013$season <- ifelse(DeltaStats_2010_2013$season == 1, "2010",DeltaStats_2010_2013$season)
+DeltaStats_2010_2013$season <- ifelse(DeltaStats_2010_2013$season == 2, "2011",DeltaStats_2010_2013$season)
+DeltaStats_2010_2013$season <- ifelse(DeltaStats_2010_2013$season == 3, "2012",DeltaStats_2010_2013$season)
+DeltaStats_2010_2013$season <- ifelse(DeltaStats_2010_2013$season == 4, "2013",DeltaStats_2010_2013$season)
+saveRDS(DeltaStats_2010_2013, "./DeltaStats2010_2013.RDS")
+table(DeltaStats_2010_2013$season)
+```
+
+
+
+```{r import single season and format into training set, eval = F}
+Seasons <- c(seq(2014,2016,1))
+Weeks <- seq(1,17,1)
+DeltaStats <- as.data.frame(NULL)
+for (i in seq(1:length(Seasons))){
+  for (j in 1:length(Weeks)){
+    GameID_DFs <- scrape_game_ids(season = Seasons[i], type = "reg", weeks = Weeks[j])
+    GameIDs <- as.character(GameID_DFs$game_id)
+    for (k in 1:length(GameIDs)){
+        HomeTeam <- as.character(GameID_DFs$home_team[k])
+        AwayTeam <- as.character(GameID_DFs$away_team[k])
+        HomeTeam <- gsub("JAX","JAC",HomeTeam)
+        AwayTeam <- gsub("JAX","JAC",AwayTeam)
+        HomeScore <- as.numeric(as.character(GameID_DFs$home_score[k]))
+        AwayScore <- as.numeric(as.character(GameID_DFs$away_score[k]))
+        PlayerStats <- player_game(GameID = GameIDs[k])
+        PlayerStats$Team <- as.character(PlayerStats$Team)
+        TeamStats <- group_by(PlayerStats[c(3,6:55)],Team) %>% summarise_all(sum)
+        TeamStats <- na.omit(TeamStats)
+        TeamStats$Team <- as.character(TeamStats$Team)
+        TeamStats$Team <- gsub("JAX","JAC",TeamStats$Team)
+        Date <- as.character(PlayerStats$date[1])
+        HomeStats <- subset(TeamStats,Team == HomeTeam)
+        AwayStats <- subset(TeamStats,Team == AwayTeam)
+        tmp <- HomeStats 
+        tmp       <- HomeStats[2:51] - AwayStats[2:51]
+        tmp$week <- Weeks[j]
+        tmp$season <- i
+        tmp$GameID <- GameIDs[k]
+        tmp$HomeTeam <- HomeTeam
+        tmp$HomeScore <- HomeScore
+        tmp$AwayTeam <- AwayTeam 
+        tmp$AwayScore <- AwayScore
+        tmp$HomeTeam <- as.character(tmp$HomeTeam)
+        tmp$AwayTeam <- as.character(tmp$AwayTeam)
+        tmp$Date <- Date
+        tmp$NetScore <- tmp$HomeScore - tmp$AwayScore
+        DeltaStats  <- rbind(DeltaStats,tmp)
+        DeltaStats[1:10,50:56]
+       }
+  }
+}
+DeltaStats2014_2016 <- DeltaStats[order(DeltaStats$GameID),]
+
+DeltaStats2014_2016$season <- ifelse(DeltaStats2014_2016$season == 1, "2014",DeltaStats2014_2016$season)
+DeltaStats2014_2016$season <- ifelse(DeltaStats2014_2016$season == 2, "2015",DeltaStats2014_2016$season)
+DeltaStats2014_2016$season <- ifelse(DeltaStats2014_2016$season == 3, "2016",DeltaStats2014_2016$season)
+saveRDS(DeltaStats2014_2016, "./DeltaStats2014_2016.RDS")
+table(DeltaStats2014_2016$season)
+```
+
+```{r import single season and format into training set, eval = F}
+Seasons <- c(seq(2017,2019,1))
+Weeks <- seq(1,17,1)
+DeltaStats <- as.data.frame(NULL)
+for (i in seq(1:length(Seasons))){
+  for (j in 1:length(Weeks)){
+    GameID_DFs <- scrape_game_ids(season = Seasons[i], type = "reg", weeks = Weeks[j])
+    GameIDs <- as.character(GameID_DFs$game_id)
+    for (k in 1:length(GameIDs)){
+        HomeTeam <- as.character(GameID_DFs$home_team[k])
+        AwayTeam <- as.character(GameID_DFs$away_team[k])
+        HomeTeam <- gsub("JAX","JAC",HomeTeam)
+        AwayTeam <- gsub("JAX","JAC",AwayTeam)
+        HomeScore <- as.numeric(as.character(GameID_DFs$home_score[k]))
+        AwayScore <- as.numeric(as.character(GameID_DFs$away_score[k]))
+        PlayerStats <- player_game(GameID = GameIDs[k])
+        PlayerStats$Team <- as.character(PlayerStats$Team)
+        TeamStats <- group_by(PlayerStats[c(3,6:55)],Team) %>% summarise_all(sum)
+        TeamStats <- na.omit(TeamStats)
+        TeamStats$Team <- as.character(TeamStats$Team)
+        TeamStats$Team <- gsub("JAX","JAC",TeamStats$Team)
+        Date <- as.character(PlayerStats$date[1])
+        HomeStats <- subset(TeamStats,Team == HomeTeam)
+        AwayStats <- subset(TeamStats,Team == AwayTeam)
+        tmp <- HomeStats 
+        tmp       <- HomeStats[2:51] - AwayStats[2:51]
+        tmp$week <- Weeks[j]
+        tmp$season <- i
+        tmp$GameID <- GameIDs[k]
+        tmp$HomeTeam <- HomeTeam
+        tmp$HomeScore <- HomeScore
+        tmp$AwayTeam <- AwayTeam 
+        tmp$AwayScore <- AwayScore
+        tmp$HomeTeam <- as.character(tmp$HomeTeam)
+        tmp$AwayTeam <- as.character(tmp$AwayTeam)
+        tmp$Date <- Date
+        tmp$NetScore <- tmp$HomeScore - tmp$AwayScore
+        DeltaStats  <- rbind(DeltaStats,tmp)
+        DeltaStats[1:10,50:56]
+       }
+  }
+}
+DeltaStats2017_2019 <- DeltaStats[order(DeltaStats$GameID),]
+DeltaStats2017_2019$season <- ifelse(DeltaStats2017_2019$season == 1, "2017",DeltaStats2017_2019$season)
+DeltaStats2017_2019$season <- ifelse(DeltaStats2017_2019$season == 2, "2018",DeltaStats2017_2019$season)
+DeltaStats2017_2019$season <- ifelse(DeltaStats2017_2019$season == 3, "2019",DeltaStats2017_2019$season)
+saveRDS(DeltaStats2017_2019, "./DeltaStats2017_2019")
+table(DeltaStats2017_2019$season)
+```
+Combine All Games 
+```{r}
+tmp1 <- readRDS("./DeltaStats2010_2013.RDS")
+tmp2 <- readRDS("./DeltaStats2014_2016.RDS")
+tmp3 <- readRDS("./DeltaStats2017_2019.RDS")
+DeltaStats <- rbind(tmp1,tmp2,tmp3)
+table(DeltaStats$season)
+glimpse(DeltaStats)
+```
+
+
+
+
+```{r regex on team names, eval=F}
+DeltaStats$HomeTeam <- gsub("GB","GNB",DeltaStats$HomeTeam)
+DeltaStats$HomeTeam <- gsub("JAC","JAX",DeltaStats$HomeTeam)
+DeltaStats$HomeTeam <- gsub("KC","KAN",DeltaStats$HomeTeam)
+DeltaStats$HomeTeam <- gsub("\\bLA\\b","LAR",DeltaStats$HomeTeam)
+DeltaStats$HomeTeam <- gsub("NE","NWE",DeltaStats$HomeTeam)
+DeltaStats$HomeTeam <- gsub("NO","NOR",DeltaStats$HomeTeam)
+DeltaStats$HomeTeam <- gsub("SD","SDC",DeltaStats$HomeTeam)
+DeltaStats$HomeTeam <- gsub("\\bSF\\b","SFO",DeltaStats$HomeTeam)
+DeltaStats$HomeTeam <- gsub("TB","TAM",DeltaStats$HomeTeam)
+DeltaStats$HomeTeam <- gsub("\\bNO\\b","NOR",DeltaStats$HomeTeam)
+DeltaStats$AwayTeam <- gsub("GB","GNB",DeltaStats$AwayTeam)
+DeltaStats$AwayTeam <- gsub("JAC","JAX",DeltaStats$AwayTeam)
+DeltaStats$AwayTeam <- gsub("KC","KAN",DeltaStats$AwayTeam)
+DeltaStats$AwayTeam <- gsub("\\bLA\\b","LAR",DeltaStats$AwayTeam)
+DeltaStats$AwayTeam <- gsub("NE","NWE",DeltaStats$AwayTeam)
+DeltaStats$AwayTeam <- gsub("\\bNO\\b","NOR",DeltaStats$AwayTeam)
+DeltaStats$AwayTeam <- gsub("\\bSF\\b","SFO",DeltaStats$AwayTeam)
+DeltaStats$AwayTeam <- gsub("TB","TAM",DeltaStats$AwayTeam)
+DeltaStats$AwayTeam <- gsub("SD","SDC",DeltaStats$AwayTeam)
+table(DeltaStats$HomeTeam)
+table(DeltaStats$AwayTeam)
+```
+
+```{r}
+AllTeams <- c(DeltaStats$HomeTeam,DeltaStats$AwayTeam)
+table(AllTeams)
+length(table(AllTeams))
+names(DeltaStats)
+saveRDS(AllTeams, "./AllTeams.RDS")
+getwd()
+```
+
+
+
+
+
+
+
+Pull out each teams perspective
+```{r}
+#set up home teams perspective
+TrainingSetHome <- DeltaStats
+TrainingSetHome$GameResult <- ifelse(TrainingSetHome$NetScore > 0, 1,-1)
+TrainingSetHome$GameResult <- ifelse(TrainingSetHome$NetScore == 0, 0,TrainingSetHome$GameResult)
+TrainingSetHome$Location <- "H"
+TrainingSetHome$Team <- DeltaStats$HomeTeam
+TrainingSetHome <- TrainingSetHome[order(TrainingSetHome$season,TrainingSetHome$week,TrainingSetHome$GameID),]
+#set up away teams perspective
+TrainingSetAway <- TrainingSetHome
+TrainingSetAway[c(1:50,59)] <- lapply(TrainingSetHome[c(1:50,59)], function(x) x * -1)
+TrainingSetAway$Location <- "A"
+TrainingSetAway$Team <- TrainingSetHome$AwayTeam
+TrainingSetAway$GameResult <- -1 * TrainingSetAway$GameResult
+AllGames <- rbind(TrainingSetHome,TrainingSetAway)
+AllGames$Date <- as.Date(AllGames$Date, "%Y-%m-%d")
+AllGames <- AllGames[order(AllGames$Team,AllGames$Date),]
+TrainingSetHome[1:10,50:62]
+AllGames[1:10,50:62]
+```
+
+
+
+
+#Engineer a strength of schedule 
+```{r}
+AllGames$Date <- as.Date(AllGames$Date, "%Y-%m-%d")
+TeamList <- data.frame(table(as.character(AllGames$Team)))
+TeamList <- as.character(TeamList$Var1)
+tmp <- data.frame(table(AllGames$season))
+SeasonsList <- as.numeric(as.character(tmp$Var1))
+TallySeasonTeam <- matrix(0,nrow = 0, ncol = ncol(AllGames)+2)
+TallySeasonTeam <- data.frame(TallySeasonTeam)
+names(TallySeasonTeam) <- c(names(AllGames),"NetWins","CumNetPoints")
+for (i in SeasonsList){
+  tmp1 <- subset(AllGames, season == i)
+  for (j in TeamList){
+    tmp2 <- subset(tmp1, Team == j)
+    tmp2$NetWins <- cumsum(tmp2$GameResult)
+    tmp2$CumNetPoints <- cumsum(tmp2$NetScore)
+    TallySeasonTeam <- rbind(TallySeasonTeam,tmp2)
+  }
+}
+TallySeasonTeam[1:10,60:64]
+```
+
+Join Games Side by Side again to determine opponents strength of schedule
+
+```{r}
+names(TallySeasonTeam) <- gsub("\\.","",names(TallySeasonTeam))
+TallySeasonTeam <- TallySeasonTeam[order(TallySeasonTeam$Date,TallySeasonTeam$GameID),]
+TallySeasonTeamHome <- subset(TallySeasonTeam, Location == "H")
+TallySeasonTeamAway <- subset(TallySeasonTeam, Location == "A")
+names(TallySeasonTeamAway) <- paste0("AwayTeam",names(TallySeasonTeamAway))
+SideBySide <- cbind(TallySeasonTeamHome, TallySeasonTeamAway[c(63,64)])
+SideBySide$DeltaWins <- SideBySide$NetWins - SideBySide$AwayTeamNetWins
+SideBySide$DeltaCumNetPoints <- SideBySide$CumNetPoints - SideBySide$AwayTeamCumNetPoints
+SideBySide <- select(SideBySide,-c("NetWins","CumNetPoints","AwayTeamNetWins","AwayTeamCumNetPoints"))
+SideBySideAway <- SideBySide
+SideBySideAway$Location <- "A"
+SideBySideAway$Team <- SideBySideAway$AwayTeam
+SideBySideAway[c(1:50,59,60,63,64)] <- lapply(SideBySideAway[c(1:50,59,60,63,64)], function(x) x * -1)
+SideBySide <- rbind(SideBySide,SideBySideAway)
+SideBySide <- SideBySide[order(SideBySide$Team,SideBySide$Date),]
+SideBySide[1:10,50:64]
+```
+
+
+```{r calcualte rolling average MA5, eval = F}
+library(zoo)
+AllGamesMA5 <- SideBySide
+AllGamesMA5[c(1:50,59,63,64)] <- lapply(AllGamesMA5[c(1:50,59,63,64)], function(x) rollmean(x = x, k = 5, fill = NA,na.pad = T,align = "right"))
+colnames(AllGamesMA5) <- gsub("NetScore","NetScoreMA5",colnames(AllGamesMA5))
+AllGamesMA5$NetScore <-  SideBySide$NetScore
+names(AllGamesMA5)
+```
+
+```{r}
+AllGames_tmp1 <- AllGamesMA5
+AllGames_tmp1[c(1:50,59,63,64)] <- lapply(AllGamesMA5[c(1:50,59,63,64)], function(x) x*5)
+AllGames_tmp2 <- AllGames_tmp1
+AllGames_tmp2[c(1:50,59,63,64)] <- AllGames_tmp1[c(1:50,59,63,64)] - SideBySide[c(1:50,59,63,64)]
+AllGamesMA5adj <- AllGames_tmp2
+AllGamesMA5adj[c(1:50,59,63,64)] <- lapply(AllGamesMA5adj[c(1:50,59,63:64)], function(x) x/4)
+SideBySide[1:10,1:10]
+AllGamesMA5[1:10,1:10]
+AllGamesMA5adj[1:10,1:10]
+HomeGamesMA5adj <- subset(AllGamesMA5adj, Location  == "H")
+HomeGamesMA5adj <- data.frame(HomeGamesMA5adj)
+write.csv(HomeGamesMA5adj,"./HomeGamesMA5adj.csv")
+```
+
+

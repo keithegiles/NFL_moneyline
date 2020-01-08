@@ -1,0 +1,127 @@
+---
+title: "ATSmerge"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(plyr)
+library(dplyr)
+library(randomForest)
+library(zoo)
+```
+import AllGamesMA5 and ATS  data
+```{r}
+AllGamesMA5 <- read.csv("HomeGamesMA5adj.csv", row.names = 1)
+ATS_df <- read.csv("../SpreadData.csv", row.names = 1)
+ATS_df <- na.omit(ATS_df)
+AllGamesMA5$Date <- as.Date(AllGamesMA5$Date, "%Y-%m-%d")
+AllGamesMA5$HomeTeam <- as.character(AllGamesMA5$HomeTeam)
+AllGamesMA5$HomeDate <- paste0(AllGamesMA5$HomeTeam,AllGamesMA5$Date)
+AllGamesMA5$HomeDate <- as.character(AllGamesMA5$HomeDate)
+ATS_df$HomeDate <- as.character(ATS_df$HomeDate)
+table(AllGamesMA5$season)
+glimpse(ATS_df)
+```
+```{r}
+ATS_df$Home <- as.character(ATS_df$Home)
+ATS_df$season <- substr(x = as.character(ATS_df$Date), start = 0,stop = 4)
+ATS_2014 <- subset(ATS_df, season == "2014")
+ATS_2014$Date <- as.character(ATS_2014$Date)
+ATS_2014$Date <- as.Date(ATS_2014$Date, "%Y-%m-%d")
+ATS_2014 <- ATS_2014[order(ATS_2014$Date),]
+ATS_2014_grouped <- group_by(ATS_2014, Date, Home) %>% summarise_all(first) %>% as.data.frame()
+ATS_df_tmp <- subset(ATS_df, season != "2014")
+ATS_df_fixed <- rbind(ATS_df_tmp,ATS_2014_grouped)
+row.names(ATS_df_fixed) <- seq(1:nrow(ATS_df_fixed))
+names(ATS_df_fixed)
+```
+
+
+
+
+ensure uniqueness of "Home_Date"
+
+```{r}
+Joined <- merge(x = AllGamesMA5, y = ATS_df_fixed[c(2:6)], by = "HomeDate")
+Joined <- subset(Joined, week >= 5)
+names(Joined)
+#drop away-perspective columns
+Joined <- Joined[-c(58,68)]
+names(Joined) <- gsub("\\.","",names(Joined))
+table(Joined$season)
+```
+
+```{r}
+Random <- Joined[sample(nrow(Joined)),]
+Random$kfold <- seq(1:5)
+names(Random) <- gsub("\\.","",names(Random))
+names(Random)
+table(Random$season)
+```
+
+```{r}
+set.seed(11)
+all_predictions <- NULL
+for (i in (1:5)){
+  train <- subset(Random[c(2:53,59,63:65,67:69)], kfold != i)
+  test <- subset(Random[c(2:53,59,63:65,67:69)], kfold == i)
+  RF <- randomForest(NetScore ~. -kfold -HomeClosingSpread -week -season, data = train, mtry = ncol(train)/3, nodesize = 10,ntree= 500)
+  tmp <- predict(object = RF, newdata = test,predict.all = T)
+  tmp_df <- data.frame(tmp$individual)
+  tmp_df$ActualNetScore <- test$NetScore
+  tmp_df$ClosingSpread <- test$HomeClosingSpread
+  tmp_df$week <- test$week
+  tmp_df$season <- test$season
+  all_predictions <- rbind(all_predictions,tmp_df)
+  saveRDS(object = RF, file = paste0("linear_RF",i,".RDS"))
+  print(i)
+}
+all_predictions$adj_score <- all_predictions$ActualNetScore + all_predictions$ClosingSpread
+all_predictions$outcome <- ifelse(all_predictions$adj_score > 0, 1,0)
+head(all_predictions)[501:504]
+```
+
+
+```{r}
+cover <- matrix(data = 0,nrow = nrow(all_predictions),ncol = 1)
+push <- matrix(data = 0,nrow = nrow(all_predictions),ncol = 1)
+not_cover <- matrix(data = 0,nrow = nrow(all_predictions),ncol = 1)
+for (j in seq(1:nrow(all_predictions))){
+  for (i in seq(1:500)){
+    tmp_cover <- as.numeric((all_predictions[j,i] + all_predictions[j,502]) > 0)
+    cover[j,1] <- cover[j,1]  + tmp_cover
+    tmp_push <- as.numeric((all_predictions[j,i] + all_predictions[j,502]) == 0)
+    push[j,1] <- push[j,1] + tmp_push
+    tmp_NotCover <- as.numeric((all_predictions[j,i] + all_predictions[j,502]) < 0)
+    not_cover[j,1] <- not_cover[j,1] + tmp_NotCover
+    }
+}
+```
+
+```{r}
+all_predictions$TotalCover <- cover[,1]
+all_predictions$TotalPush <-  push[,1]
+all_predictions$TotalNot <- not_cover[,1]
+PredictiveSummary <- all_predictions[501:509]
+PredictiveSummary$pCover <- PredictiveSummary$TotalCover/500
+PredictiveSummary$pPush <- PredictiveSummary$TotalPush/500
+PredictiveSummary$pNot <- PredictiveSummary$TotalNot/500
+PredictiveSummary$Prediction <- ifelse(PredictiveSummary$pCover > .5,1,0)
+table(PredictiveSummary$Prediction,PredictiveSummary$outcome)
+PredictiveSummary$PredictionResult <- ifelse(PredictiveSummary$outcome == PredictiveSummary$Prediction, 1,0)
+sum(PredictiveSummary$PredictionResult)/nrow(PredictiveSummary)
+glimpse(PredictiveSummary)
+```
+
+Week by Week sumamry
+```{r}
+#drop pushes 
+tmp <- subset(PredictiveSummary, adj_score != 0)
+SeasonalSummaries <- group_by(tmp, season) %>% summarise(TotalGames = n(), MeanSuccess = mean(PredictionResult))
+SeasonalSummaries
+WeeklySummaries <- group_by(tmp,week) %>% summarise(TotalGames = n(), MeanSuccess = mean(PredictionResult))
+WeeklySummaries
+```
+
+

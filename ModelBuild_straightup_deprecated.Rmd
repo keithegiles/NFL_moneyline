@@ -1,0 +1,287 @@
+---
+title: "ATSmerge"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(plyr)
+library(dplyr)
+library(randomForest)
+library(zoo)
+library(ranger)
+library(readxl)
+```
+import AllGamesMA5 and ATS  data
+
+
+```{r}
+AllGamesMA5 <- read.csv("HomeGamesMA5adj.csv", row.names = 1)
+AllGamesMA5$Date <- as.Date(AllGamesMA5$Date, "%Y-%m-%d")
+AllGamesMA5$HomeTeam <- as.character(AllGamesMA5$HomeTeam)
+AllGamesMA5$HomeDate <- paste0(AllGamesMA5$HomeTeam,AllGamesMA5$Date)
+AllGamesMA5$HomeDate <- as.character(AllGamesMA5$HomeDate)
+table(AllGamesMA5$season)
+```
+
+
+```{r}
+Spread <- read.csv(file = "/home/rstudio/nfl_predictions/SpreadData.csv", row.names = 1)
+Spread$Date <- as.Date(Spread$Date, "%Y-%m-%d")
+Spread <- subset(Spread, !is.na(Date))
+Spread$HomeDate <- as.character(Spread$HomeDate)
+SpreadGrouped <- group_by(Spread,HomeDate) %>% summarise(OpeningSpread = first(Home.Opening.Spread),ClosingSpread = first(Home.Closing.Spread)) %>% as.data.frame()
+length(unique(Spread$HomeDate))/nrow(SpreadGrouped)
+names(Spread) <- c("Date","HomeTeam","Score","HomeOpeningSpread","HomeClosingSpread","HomeDate")
+Spread <- select(Spread, -Score)
+glimpse(Spread)
+```
+bring in spread16-18
+```{r}
+Spread16_18 <- readRDS("/home/rstudio/Spread16_18.RDS")
+names(Spread16_18) <- c("Season","Week","Date","HomeTeam","HomeOpeningSpread","HomeClosingSpread")
+Spread16_18$HomeDate <- paste0(Spread16_18$HomeTeam,as.character(Spread16_18$Date))
+Spread16_18 <- select(Spread16_18, -c(Season,Week))
+glimpse(Spread16_18)
+```
+```{r}
+Spread10_18 <- rbind(Spread,Spread16_18)
+```
+
+```{r}
+SpreadGrouped <- group_by(Spread10_18,HomeDate) %>% summarise(HomeTeam = first(HomeTeam), OpeningSpread = first(HomeOpeningSpread),ClosingSpread = first(HomeClosingSpread)) %>% as.data.frame()
+glimpse(SpreadGrouped)
+```
+
+
+```{r}
+Joined1 <- merge(x = AllGamesMA5, y = SpreadGrouped, by ="HomeDate")
+Joined1$NetScoreAdj <- Joined1$NetScore + Joined1$ClosingSpread
+Joined1$Movement <- Joined1$OpeningSpread - Joined1$ClosingSpread
+names(Joined1)
+table(Joined1$season)
+```
+
+
+ensure uniqueness of "Home_Date"
+
+```{r}
+TrainingSet <- subset(Joined1, week >= 5 & Location == "H" & season != 2018)
+#drop uneeded fields
+#TestSet$HomeAndAway <- paste0(TestSet$HomeTeam,"at",TestSet$AwayTeam)
+TrainingSet$week <- as.factor(TrainingSet$week)
+table(TrainingSet$week)
+names(TrainingSet)
+glimpse(TrainingSet)
+```
+
+```{r}
+EightYearModel  <- randomForest(NetScore ~., data = subset(TrainingSet[c(2:52,60,64:66,71)]), mtry= 54/3, nodesize = 10, ntree = 500)
+AllFeaturesImportance <- data.frame(EightYearModel$importance)
+AllFeaturesImportance$Features <- row.names(AllFeaturesImportance)
+AllFeaturesImportance <- AllFeaturesImportance[order(-AllFeaturesImportance$IncNodePurity),]
+head(AllFeaturesImportance)
+```
+```{r}
+MSE <- NULL
+FeatureNumber <- NULL
+for (i in seq(1:length(AllFeaturesImportance$Features))){
+  FeatureList <- AllFeaturesImportance$Features[1:i]
+  FeatureList <- c(FeatureList, "NetScore")
+  tmp_model <- randomForest(NetScore~., data = subset(TrainingSet, select = names(TrainingSet) %in% FeatureList, mtry = length(AllFeaturesImportance$Features/3,nodesize = 10, ntree = 500)))
+  tmp_MSE <- sum(tmp_model$mse)
+  MSE <- c(MSE,tmp_MSE)
+  tmp_number <- i
+  FeatureNumber <- c(FeatureNumber,tmp_number)
+}
+Summary <- data.frame(cbind(FeatureNumber,MSE))
+Summary <- Summary[order(Summary$MSE),]
+Summary
+#first 33 features gives lowest MSE
+```
+Iterate through node size parameter
+```{r}
+nodelist <- c(1,5,10,15,20,100)
+MSE <- NULL
+NodeSize <- NULL
+for (i in seq(1:length(nodelist))){
+FeatureList <- c(AllFeaturesImportance$Features[1:33],"NetScore")
+tmp_model  <- randomForest(NetScore ~., data = subset(TrainingSet,select = names(TrainingSet) %in% FeatureList), mtry= length(FeatureList)/3, nodesize = nodelist[i], ntree = 500)
+tmp_MSE <- sum(tmp_model$mse)
+MSE <- c(MSE,tmp_MSE)
+tmp_number <- nodelist[i]
+NodeSize <- c(NodeSize,tmp_number)
+}
+SummaryNodeSize <- data.frame(cbind(NodeSize,MSE))
+SummaryNodeSize
+```
+
+Build Final Model
+```{r}
+FeatureList <- c(AllFeaturesImportance$Features[1:33],"NetScore")
+WeekList <- seq(from=5, to=17, by = 1)
+for (i in seq(1:length(WeekList))){
+    training_set_tmp <- subset(TrainingSet, week == WeekList[i], select = names(TrainingSet) %in% FeatureList)
+    training_set_tmp <- select(training_set_tmp, -week)
+    tmp_model <- randomForest(NetScore ~., training_set_tmp, mtry= length(FeatureList)/3, nodesize = 100, ntree = 500)
+    saveRDS(tmp_model,file = paste0("Week",WeekList[i],"Model.RDS"))
+    print(WeekList[i])
+}
+```
+
+
+
+
+```{r}
+#Pull in 2019 lines
+Week7 <- readRDS("/home/rstudio/ShinyApps/sample-apps/microalphaminer/week7matchups.RDS")
+Week8 <- readRDS("/home/rstudio/ShinyApps/sample-apps/microalphaminer/week8matchups.RDS")
+Week9 <- readRDS("/home/rstudio/ShinyApps/sample-apps/microalphaminer/week9matchups.RDS")
+Week10 <- readRDS("/home/rstudio/ShinyApps/sample-apps/microalphaminer/week10matchups.RDS")
+Week11 <- readRDS("/home/rstudio/ShinyApps/sample-apps/microalphaminer/week11matchups.RDS")
+Week12 <- readRDS("/home/rstudio/ShinyApps/sample-apps/microalphaminer/week12matchups.RDS")
+Week13 <- readRDS("/home/rstudio/ShinyApps/sample-apps/microalphaminer/week13matchups.RDS")
+Week14 <- readRDS("/home/rstudio/ShinyApps/sample-apps/microalphaminer/week14matchups.RDS")
+Week15 <- readRDS("/home/rstudio/ShinyApps/sample-apps/microalphaminer/week15matchups.RDS")
+Week16 <- read.table("/home/rstudio/ShinyApps/sample-apps/microalphaminer/week16.txt",header = T,colClasses = c("character","character","numeric"))
+Week16$bovada <- Week16$spread
+Week16 <- Week16[c(2,1,3,4)]
+names(Week16) <- c("home_team","away_team","home_spread","bovada")
+
+Week17 <- read.table("/home/rstudio/ShinyApps/sample-apps/microalphaminer/week17.txt",header = T, colClasses = c("character","character","numeric"))
+Week17$bovada <- Week17$spread
+Week17 <- Week17[c(2,1,3,4)]
+names(Week17) <- c("home_team","away_team","home_spread","bovada")
+```
+
+```{r}
+Week7$week <- 7
+Week7$bovada <- Week7$LastSpread
+names(Week7) <- c("home_team","away_team","home_spread","week","bovada")
+Week7 <- Week7[c(1:3,5,4)]
+Week8$week <- 8
+Week9$week <- 9
+Week10$week <- 10
+Week11$week <- 11
+Week12$week <- 12
+Week13$week <- 13
+Week14$week <- 14
+Week15$week <- 15
+Week16$week <- 16
+names(Week16) <- names(Week15)
+Week17$week <- 17
+Season2019 <- rbind(Week7,Week8,Week9,Week10,Week11,Week12,Week13,Week14,Week15,Week16,Week17)
+Season2019$HomeAndAway <- paste0(Season2019$home_team, "at", Season2019$away_team)
+head(Season2019)
+```
+
+
+Generate 2019 TestSet, merge w 2019 data and run model
+```{r}
+TestSet <- subset(AllGamesMA5, season == "2018" & Location == "H")
+TestSet$HomeAndAway <- paste0(TestSet$HomeTeam,"at",TestSet$AwayTeam)
+TestSetJoined <- merge(x = TestSet,y = Season2019[c(1:4,6)], by = "HomeAndAway")
+TestSetJoined$Movement <- TestSetJoined$home_spread - TestSetJoined$bovada
+TestSetJoined$week <- as.factor(as.character(TestSetJoined$week))
+TestSetJoined$NetScore <- as.numeric(TestSetJoined$NetScore)
+TestSetJoined$week <- as.character(TestSetJoined$week)
+#add extra lines with weeks 5 and 6
+#extra_weeks <- TestSetJoined[1:2,]
+#extra_weeks$week[1] <- "5"
+#extra_weeks$week[2] <- "6"
+#TestSetJoined <- rbind(TestSetJoined, extra_weeks)
+#TestSetJoined$week <- as.factor(TestSetJoined$week)
+table(TestSetJoined$week)
+```
+
+
+#Joined <- merge(x = Season2019[c(3,6)], y = TestSet, by = "HomeAndAway")
+
+
+
+```{r}
+tmp_test_set <- subset(TestSetJoined, week == WeekList[i], select = names(TestSetJoined) %in% FeatureList)
+TestSetPredictions <- matrix(data = 0, nrow = 0, ncol = 500)
+TestSetPredictions <- data.frame(TestSetPredictions)
+names(TestSetPredictions) <- names(tmp_test_set)
+for (i in seq(from=3, to=length(WeekList), by = 1)){
+  tmp_test_set <- subset(TestSetJoined, week == WeekList[i], select = names(TestSetJoined) %in% FeatureList)
+  tmp_test_set <- select(tmp_test_set, -week)
+  model <- readRDS(paste0("Week",WeekList[i],"Model.RDS"))
+  tmp <- predict(model, tmp_test_set,predict.all = T)
+  tmp_predictions <- tmp$individual
+  tmp_predictions <- data.frame(tmp_predictions)
+  names(tmp_predictions) <- paste0("model",seq(1:500))
+  TestSetPredictions <- rbind(TestSetPredictions, tmp_predictions)
+  TestSetPredictions <- data.frame(TestSetPredictions)
+  }
+TestSetPredictions <- cbind(TestSetJoined, TestSetPredictions)
+TestSetPredictions <- subset(TestSetPredictions, week != "6")
+TestSetPredictions <- subset(TestSetPredictions, week != "5")
+table(TestSetPredictions$week)
+```
+
+```{r}
+cover <- matrix(data = 0,nrow = nrow(TestSetPredictions),ncol = 1)
+push <- matrix(data = 0,nrow = nrow(TestSetPredictions),ncol = 1)
+not_cover <- matrix(data = 0,nrow = nrow(TestSetPredictions),ncol = 1)
+for (j in seq(1:nrow(TestSetPredictions))){
+  for (i in seq(from = 73, to= 572, by = 1)){
+    tmp_cover <- as.numeric((TestSetPredictions[j,i] + TestSetPredictions[j,70]) > 0)
+    cover[j,1] <- cover[j,1]  + tmp_cover
+    tmp_push <- as.numeric((TestSetPredictions[j,i] + TestSetPredictions[j,70]) == 0)
+    push[j,1] <- push[j,1] + tmp_push
+    tmp_NotCover <- as.numeric((TestSetPredictions[j,i]  + TestSetPredictions[j,70]) < 0)
+    not_cover[j,1] <- not_cover[j,1] + tmp_NotCover
+    }
+}
+head(cover+push+not_cover)
+```
+
+```{r}
+TestSetPredictions$TotalCover <- cover[,1]
+TestSetPredictions$TotalPush <-  push[,1]
+TestSetPredictions$TotalNot <- not_cover[,1]
+TestSetPredictions$pCover <- TestSetPredictions$TotalCover/500
+TestSetPredictions$pPush <- TestSetPredictions$TotalPush/500
+TestSetPredictions$pNot <- TestSetPredictions$TotalNot/500
+TestSetPredictions$Prediction <- ifelse(TestSetPredictions$pCover > .5, 1,'na')
+TestSetPredictions$Prediction <- ifelse(TestSetPredictions$pCover < .5, -1, TestSetPredictions$Prediction)
+TestSetPredictions$Prediction <- ifelse(TestSetPredictions$pCover < .5 & TestSetPredictions$pNot < .5, 0, TestSetPredictions$Prediction)
+TestSetPredictions$Prediction <- ifelse(TestSetPredictions$pCover == .5, 0, TestSetPredictions$Prediction)
+TestSetPredictions$NetScoreAdj <- TestSetPredictions$NetScore + TestSetPredictions$home_spread
+TestSetPredictions$ActualOutcome <- ifelse(TestSetPredictions$NetScoreAdj > 0, 1, 'na')
+TestSetPredictions$ActualOutcome <- ifelse(TestSetPredictions$NetScoreAdj < 0, -1, TestSetPredictions$ActualOutcome)
+TestSetPredictions$ActualOutcome <- ifelse(TestSetPredictions$NetScoreAdj == 0, 0, TestSetPredictions$ActualOutcome)
+TestSetPredictions$PredictionOutcome <- ifelse(TestSetPredictions$Prediction == TestSetPredictions$ActualOutcome,1,0)
+TestSetNoPush <- subset(TestSetPredictions, Prediction != 0)
+TestSetNoPush <- subset(TestSetNoPush, ActualOutcome != 0)
+TestSetNoPush$week <- as.character(TestSetNoPush$week)
+table(TestSetPredictions$Prediction,TestSetPredictions$ActualOutcome)
+table(TestSetPredictions$Prediction)
+table(TestSetPredictions$ActualOutcome)
+sum(TestSetNoPush$PredictionOutcome)/nrow(TestSetNoPush)
+```
+
+```{r}
+WeeklySummary <- group_by(TestSetNoPush, as.numeric(as.character(week))) %>% summarise(TotalGames = n(), TotalWins = sum(PredictionOutcome)) %>% as.data.frame()
+WeeklySummary$Percent <- WeeklySummary$TotalWins/WeeklySummary$TotalGames
+Mean <- mean(WeeklySummary$Percent[1:8])
+SD <- sd(WeeklySummary$Percent[1:8])
+WeeklySummary
+paste0("ModelResults: ",Mean,"+/-",SD)
+```
+
+
+```{r}
+Sixty <- subset(TestSetNoPush, pCover >= .6 | pCover <= .4)
+Seventy <- subset(TestSetNoPush, pCover >= .7 | pCover <= .3)
+Eighty <- subset(TestSetNoPush,pCover >= .8 | pCover <= .2)
+
+sum(Sixty$PredictionOutcome)/nrow(Sixty)
+sum(Seventy$PredictionOutcome)/nrow(Seventy)
+sum(Eighty$PredictionOutcome)/nrow(Eighty)
+```
+
+
+
